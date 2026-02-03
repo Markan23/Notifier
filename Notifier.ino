@@ -1,28 +1,39 @@
 // RX (to DY-SV8F TX): GPIO 20 (often labeled RX or U0RXD — default UART0 RX 1K series)
-// TX (to DY-SV8F RX): GPIO 21 (often labeled TX or U0TXD — default UART0 TX 1K series)
+// TX (to DY-SV8F RX): GPIO 21 (often labeled TX or U0TXD — default UART0 TX 1K serie
 
-#include <WiFi.h>                // Instead of ESP8266WiFi.h
+#include <WiFi.h>                // 
 #include <PubSubClient.h>
 #include <HardwareSerial.h>      // Built-in, no extra library needed
 #include <DYPlayerArduino.h>
 #include <ArduinoJson.h>
 
 // Pins - adjust if your labeling differs (check with multimeter or blink test)
-#define PLAYER_RX_PIN 20     // GPIO20 → DY-SV8F TX
-#define PLAYER_TX_PIN 21     // GPIO21 → DY-SV8F RX
+// Change this line:
 
-HardwareSerial playerSerial(0);  // UART0 (default console UART, but remappable & works)
+// And pick two free GPIOs, e.g.:
+#define PLAYER_RX_PIN 10     // Example: GPIO10 → DY-SV8F TX
+#define PLAYER_TX_PIN 7      // Example: GPIO7  → DY-SV8F RX
+
+//#define PLAYER_RX_PIN 20     // GPIO20 → DY-SV8F TX
+//#define PLAYER_TX_PIN 21     // GPIO21 → DY-SV8F RX
+
+//HardwareSerial playerSerial(0);  // ← Use UART1 instead of 0
+HardwareSerial playerSerial(1);  // UART0 (default console UART, but remappable & works)
 DY::Player player(&playerSerial);
 
 // ── WiFi & MQTT ──────────────────────────────────────────────────────────────
-const char* ssid       = "my_ssid";              // WiFi SSID
-const char* password   = "my_wifi_password";   // WiFi Password
-const char* mqtt_server = "MQTT broker ip";     // Broker IP
-const char* mqtt_user     = "MQTT Username";   // mqtt username
-const char* mqtt_password = "MQTT Password";       // mqtt password
+const char* ssid       = "Wifi-SSID";              // WiFi SSID
+const char* password   = "WiFi Password";   // WiFi Password
+const char* mqtt_server = "Brokey IP";     // Broker IP
+const char* mqtt_user     = "mqtt username";   // mqtt username
+const char* mqtt_password = "mqtt password";       // mqtt password
 const int   mqtt_port  = 1883;
 const char* mqtt_topic_in = "alert/notifier";     // subscribe here
 const char* mqtt_topic_out = "alert/status";     // subscribe here
+const char* mqtt_topic_played = "alert/played";     // subscribe here
+ 
+unsigned long lastHeartbeat = 0;
+const unsigned long HEARTBEAT_INTERVAL = 5UL * 60 * 1000;  // 5 minutes in milliseconds
 
 // ── MQTT ─────────────────────────────────────────────────────────────────────
 WiFiClient espClient;
@@ -46,7 +57,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
   Serial.print("MQTT message on [");
   Serial.print(topic);
   Serial.print("] → ");
-
+  char played[5];
   // Print raw payload for debugging
   String message;
   for (unsigned int i = 0; i < length; i++) {
@@ -63,7 +74,6 @@ void callback(char* topic, byte* payload, unsigned int length) {
     Serial.println(error.c_str());
     return;
   }
-
   // ── Extract values ────────────────────────────────────────────────────────
   int file   = doc["file"]   | -1;     // -1 = not present
   int volume = doc["volume"] | -1;
@@ -86,8 +96,11 @@ void callback(char* topic, byte* payload, unsigned int length) {
     player.setPlayingDevice(DY::Device::Flash);   // or SD if you use card
     player.playSpecified(file);                   // Plays 0000X.mp3 where X = file
     Serial.print("Playing file: "); Serial.println(file);
-    client.publish(mqtt_topic_out, "alert");
+    itoa( file, played, 10 );
+    client.publish(mqtt_topic_played, played);
   }
+  //while(!ready_pin())
+  //  client.publish(mqtt_topic_out, "connected");  
 }
 
 void reconnect() {
@@ -140,4 +153,18 @@ void loop() {
     reconnect();
   }
   client.loop();
+
+  // Periodic heartbeat
+  unsigned long now = millis();
+  if (now - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+    lastHeartbeat = now;
+    
+    // Only publish if we're actually connected
+    if (client.connected()) {
+      client.publish(mqtt_topic_out, "connected");
+      Serial.println("Published heartbeat: connected");
+    } else {
+      Serial.println("Heartbeat skipped - MQTT not connected");
+    }
+  }
 }
